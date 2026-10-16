@@ -1,8 +1,16 @@
-import { describe, test, expect, beforeAll, afterAll } from 'vitest';
+import { describe, test, expect, expectTypeOf, beforeAll, afterAll, beforeEach } from 'vitest';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'http';
-import { Wraith, WraithAgent } from '../src/client';
+import {
+  Wraith,
+  WraithAgent,
+  AgentResponseError,
+  RPCRequestError,
+  validateAgentStatus,
+  validatePayment,
+  parseToolCallPayments,
+} from '../src/client';
 import { Chain } from '../src/types';
-import type { AgentInfo } from '../src/types';
+import type { AgentInfo, AgentStatus, Payment } from '../src/types';
 
 const TEST_API_KEY = 'wraith_test_key123';
 const AGENT_ID = 'agent-001';
@@ -17,6 +25,9 @@ const mockAgentInfo: AgentInfo = {
 
 let server: Server;
 let baseUrl: string;
+let nextStatusPayload: unknown;
+let nextStatusRawBody: string | null = null;
+let nextChatPayload: unknown;
 let lastRequest: {
   method: string;
   url: string;
@@ -40,6 +51,16 @@ function parseBody(req: IncomingMessage): Promise<any> {
   });
 }
 
+beforeEach(() => {
+  nextStatusPayload = { balance: '1.5', tokens: { USDC: '100' } };
+  nextStatusRawBody = null;
+  nextChatPayload = {
+    response: 'Hello! How can I help?',
+    toolCalls: [],
+    conversationId: 'conv-001',
+  };
+});
+
 beforeAll(async () => {
   server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const body = await parseBody(req);
@@ -58,18 +79,16 @@ beforeAll(async () => {
     }
 
     if (req.url === `/agent/${AGENT_ID}/chat` && req.method === 'POST') {
-      res.end(
-        JSON.stringify({
-          response: 'Hello! How can I help?',
-          toolCalls: [],
-          conversationId: 'conv-001',
-        }),
-      );
+      res.end(JSON.stringify(nextChatPayload));
       return;
     }
 
     if (req.url === `/agent/${AGENT_ID}/status` && req.method === 'GET') {
-      res.end(JSON.stringify({ balance: '1.5', tokens: { USDC: '100' } }));
+      if (nextStatusRawBody !== null) {
+        res.end(nextStatusRawBody);
+      } else {
+        res.end(JSON.stringify(nextStatusPayload));
+      }
       return;
     }
 
@@ -223,9 +242,10 @@ describe('Wraith', () => {
     expect(agent.info.id).toBe(AGENT_ID);
   });
 
-  test('HTTP error throws with server message', async () => {
+  test('HTTP error throws RPCRequestError with server message', async () => {
     const wraith = new Wraith({ apiKey: TEST_API_KEY, baseUrl });
 
+    await expect(wraith._request('GET', '/error-test')).rejects.toThrow(RPCRequestError);
     await expect(wraith._request('GET', '/error-test')).rejects.toThrow('Bad request');
   });
 });
@@ -249,14 +269,290 @@ describe('WraithAgent', () => {
     expect(lastRequest.body.message).toBe('hello');
   });
 
-  test('getBalance returns formatted balance', async () => {
+  test('getStatus returns typed AgentStatus for a valid payload', async () => {
+    const wraith = new Wraith({ apiKey: TEST_API_KEY, baseUrl });
+    const agent = wraith.agent(AGENT_ID);
+
+    const statusPromise = agent.getStatus();
+    expectTypeOf(statusPromise).toEqualTypeOf<Promise<AgentStatus>>();
+
+    const status = await statusPromise;
+    expect(status).toEqual({ balance: '1.5', tokens: { USDC: '100' } });
+  });
+
+  test('getStatus throws AgentResponseError when response body is not valid JSON', async () => {
+    const wraith = new Wraith({ apiKey: TEST_API_KEY, baseUrl });
+    const agent = wraith.agent(AGENT_ID);
+    nextStatusRawBody = '<<<not-json>>>';
+
+    await expect(agent.getStatus()).rejects.toMatchObject({
+      name: 'AgentResponseError',
+      code: 'WRAITH/NETWORK/AGENT_RESPONSE',
+      field: 'body',
+    });
+  });
+
+  test('getStatus throws AgentResponseError when payload is not an object', async () => {
+    const wraith = new Wraith({ apiKey: TEST_API_KEY, baseUrl });
+    const agent = wraith.agent(AGENT_ID);
+    nextStatusPayload = ['not', 'an', 'object'];
+
+    await expect(agent.getStatus()).rejects.toMatchObject({
+      name: 'AgentResponseError',
+      code: 'WRAITH/NETWORK/AGENT_RESPONSE',
+      field: 'body',
+    });
+  });
+
+  test('getStatus throws AgentResponseError when balance is missing or not a non-empty string', async () => {
+    const wraith = new Wraith({ apiKey: TEST_API_KEY, baseUrl });
+    const agent = wraith.agent(AGENT_ID);
+
+    for (const invalidBalance of [undefined, null, 1.5, '', '   ', {}]) {
+      nextStatusPayload = { balance: invalidBalance, tokens: { USDC: '100' } };
+      await expect(agent.getStatus()).rejects.toMatchObject({
+        name: 'AgentResponseError',
+        code: 'WRAITH/NETWORK/AGENT_RESPONSE',
+        field: 'balance',
+      });
+    }
+  });
+
+  test('getStatus throws AgentResponseError when tokens is missing or malformed', async () => {
+    const wraith = new Wraith({ apiKey: TEST_API_KEY, baseUrl });
+    const agent = wraith.agent(AGENT_ID);
+
+    for (const invalidTokens of [undefined, null, ['USDC'], '100']) {
+      nextStatusPayload = { balance: '1.5', tokens: invalidTokens };
+      await expect(agent.getStatus()).rejects.toMatchObject({
+        name: 'AgentResponseError',
+        code: 'WRAITH/NETWORK/AGENT_RESPONSE',
+        field: 'tokens',
+      });
+    }
+
+    nextStatusPayload = { balance: '1.5', tokens: { USDC: 100 } };
+    await expect(agent.getStatus()).rejects.toMatchObject({
+      name: 'AgentResponseError',
+      code: 'WRAITH/NETWORK/AGENT_RESPONSE',
+      field: 'tokens.USDC',
+    });
+
+    nextStatusPayload = { balance: '1.5', tokens: { USDC: '' } };
+    await expect(agent.getStatus()).rejects.toMatchObject({
+      name: 'AgentResponseError',
+      code: 'WRAITH/NETWORK/AGENT_RESPONSE',
+      field: 'tokens.USDC',
+    });
+  });
+
+  test('getBalance returns formatted balance and propagates status validation errors', async () => {
     const wraith = new Wraith({ apiKey: TEST_API_KEY, baseUrl });
     const agent = wraith.agent(AGENT_ID);
 
     const balance = await agent.getBalance();
-
     expect(balance.native).toBe('1.5');
     expect(balance.tokens.USDC).toBe('100');
+
+    nextStatusPayload = { balance: 123, tokens: {} };
+    await expect(agent.getBalance()).rejects.toThrow(AgentResponseError);
+  });
+
+  test('scanPayments parses and validates tool-call payment records', async () => {
+    const wraith = new Wraith({ apiKey: TEST_API_KEY, baseUrl });
+    const agent = wraith.agent(AGENT_ID);
+
+    const validPayments: Payment[] = [
+      {
+        stealthAddress: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+        balance: '10.5',
+        ephemeralPubKey: '0x1111111111111111111111111111111111111111111111111111111111111111',
+      },
+      {
+        stealthAddress: '0x1234567890abcdef1234567890abcdef12345678',
+        balance: '0.25',
+        ephemeralPubKey: '0x02abcdef',
+      },
+    ];
+
+    nextChatPayload = {
+      response: 'Found 2 incoming payments.',
+      conversationId: 'conv-scan-1',
+      toolCalls: [
+        { name: 'resolve_name', status: 'completed', detail: 'non-json-ignored-for-other-tools' },
+        {
+          name: 'scan_payments',
+          status: 'completed',
+          detail: JSON.stringify(validPayments),
+        },
+      ],
+    };
+
+    const paymentsPromise = agent.scanPayments();
+    expectTypeOf(paymentsPromise).toEqualTypeOf<Promise<Payment[]>>();
+
+    const payments = await paymentsPromise;
+    expect(payments).toEqual(validPayments);
+  });
+
+  test('scanPayments returns empty array when no scan_payments tool call is present', async () => {
+    const wraith = new Wraith({ apiKey: TEST_API_KEY, baseUrl });
+    const agent = wraith.agent(AGENT_ID);
+
+    nextChatPayload = {
+      response: 'No payments found.',
+      conversationId: 'conv-scan-empty',
+    };
+    await expect(agent.scanPayments()).resolves.toEqual([]);
+  });
+
+  test('scanPayments throws AgentResponseError when scan_payments detail is missing or invalid JSON', async () => {
+    const wraith = new Wraith({ apiKey: TEST_API_KEY, baseUrl });
+    const agent = wraith.agent(AGENT_ID);
+
+    nextChatPayload = {
+      response: 'Scanned',
+      conversationId: 'conv-bad-detail',
+      toolCalls: [{ name: 'scan_payments', status: 'completed' }],
+    };
+    await expect(agent.scanPayments()).rejects.toMatchObject({
+      name: 'AgentResponseError',
+      code: 'WRAITH/NETWORK/AGENT_RESPONSE',
+      field: 'toolCalls[0].detail',
+    });
+
+    nextChatPayload = {
+      response: 'Scanned',
+      conversationId: 'conv-bad-json',
+      toolCalls: [{ name: 'scan_payments', status: 'completed', detail: '{malformed-json' }],
+    };
+    await expect(agent.scanPayments()).rejects.toMatchObject({
+      name: 'AgentResponseError',
+      code: 'WRAITH/NETWORK/AGENT_RESPONSE',
+      field: 'toolCalls[0].detail',
+    });
+  });
+
+  test('scanPayments throws AgentResponseError when parsed detail is not an array', async () => {
+    const wraith = new Wraith({ apiKey: TEST_API_KEY, baseUrl });
+    const agent = wraith.agent(AGENT_ID);
+
+    nextChatPayload = {
+      response: 'Scanned',
+      conversationId: 'conv-non-array',
+      toolCalls: [
+        {
+          name: 'scan_payments',
+          status: 'completed',
+          detail: JSON.stringify({
+            stealthAddress: 'GAAA',
+            balance: '10',
+            ephemeralPubKey: '0x11',
+          }),
+        },
+      ],
+    };
+
+    await expect(agent.scanPayments()).rejects.toMatchObject({
+      name: 'AgentResponseError',
+      code: 'WRAITH/NETWORK/AGENT_RESPONSE',
+      field: 'toolCalls[0].detail',
+    });
+  });
+
+  test('scanPayments throws AgentResponseError when any payment record has missing or wrong-type fields', async () => {
+    const wraith = new Wraith({ apiKey: TEST_API_KEY, baseUrl });
+    const agent = wraith.agent(AGENT_ID);
+
+    const invalidCases: Array<{ record: unknown; expectedField: string }> = [
+      { record: null, expectedField: 'toolCalls[0].detail[0]' },
+      { record: 'not-an-object', expectedField: 'toolCalls[0].detail[0]' },
+      {
+        record: { balance: '10', ephemeralPubKey: '0x11' },
+        expectedField: 'toolCalls[0].detail[0].stealthAddress',
+      },
+      {
+        record: { stealthAddress: 123, balance: '10', ephemeralPubKey: '0x11' },
+        expectedField: 'toolCalls[0].detail[0].stealthAddress',
+      },
+      {
+        record: { stealthAddress: '0xabc', balance: 10, ephemeralPubKey: '0x11' },
+        expectedField: 'toolCalls[0].detail[0].balance',
+      },
+      {
+        record: { stealthAddress: '0xabc', balance: '10', ephemeralPubKey: '' },
+        expectedField: 'toolCalls[0].detail[0].ephemeralPubKey',
+      },
+    ];
+
+    for (const { record, expectedField } of invalidCases) {
+      nextChatPayload = {
+        response: 'Scanned',
+        conversationId: 'conv-invalid-record',
+        toolCalls: [
+          {
+            name: 'scan_payments',
+            status: 'completed',
+            detail: JSON.stringify([record]),
+          },
+        ],
+      };
+
+      await expect(agent.scanPayments()).rejects.toMatchObject({
+        name: 'AgentResponseError',
+        code: 'WRAITH/NETWORK/AGENT_RESPONSE',
+        field: expectedField,
+      });
+    }
+  });
+
+  test('chat throws AgentResponseError on malformed ChatResponse envelope or toolCalls', async () => {
+    const wraith = new Wraith({ apiKey: TEST_API_KEY, baseUrl });
+    const agent = wraith.agent(AGENT_ID);
+
+    nextChatPayload = { response: 123, conversationId: 'conv-1' };
+    await expect(agent.chat('hi')).rejects.toMatchObject({
+      name: 'AgentResponseError',
+      field: 'response',
+    });
+
+    nextChatPayload = { response: 'ok', conversationId: '' };
+    await expect(agent.chat('hi')).rejects.toMatchObject({
+      name: 'AgentResponseError',
+      field: 'conversationId',
+    });
+
+    nextChatPayload = { response: 'ok', conversationId: 'conv-1', toolCalls: 'not-an-array' };
+    await expect(agent.chat('hi')).rejects.toMatchObject({
+      name: 'AgentResponseError',
+      field: 'toolCalls',
+    });
+
+    nextChatPayload = {
+      response: 'ok',
+      conversationId: 'conv-1',
+      toolCalls: [{ name: 'scan_payments', status: 200 }],
+    };
+    await expect(agent.chat('hi')).rejects.toMatchObject({
+      name: 'AgentResponseError',
+      field: 'toolCalls[0].status',
+    });
+  });
+
+  test('validation helpers validateAgentStatus, validatePayment, and parseToolCallPayments directly', () => {
+    const url = 'https://api.wraith.dev/agent/agent-001/status';
+    expect(validateAgentStatus({ balance: '5.0', tokens: { XLM: '10' } }, url)).toEqual({
+      balance: '5.0',
+      tokens: { XLM: '10' },
+    });
+
+    const payment = validatePayment(
+      { stealthAddress: 'GABC', balance: '2.5', ephemeralPubKey: '0xdeadbeef' },
+      url,
+    );
+    expect(payment.stealthAddress).toBe('GABC');
+
+    expect(parseToolCallPayments(JSON.stringify([payment]), url)).toEqual([payment]);
   });
 
   test('exportKey sends signature', async () => {

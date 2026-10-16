@@ -5,6 +5,16 @@
 ```ts
 
 // @public
+export class AgentResponseError extends WraithNetworkError {
+    constructor(url: string, field: string, reason: string);
+    // (undocumented)
+    readonly code = "WRAITH/NETWORK/AGENT_RESPONSE";
+    // (undocumented)
+    describe(): string;
+    readonly field: string;
+}
+
+// @public
 export function assertWalletNetwork(adapter: WalletAdapter, expectedNetwork: string): Promise<void>;
 
 // @public

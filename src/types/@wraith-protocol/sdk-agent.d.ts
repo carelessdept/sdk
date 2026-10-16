@@ -24,7 +24,7 @@ declare module '@wraith-protocol/sdk-agent' {
   export class WraithAgent {
     readonly info: AgentInfo;
     chat(message: string, conversationId?: string): Promise<ChatResponse>;
-    getStatus(): Promise<any>;
+    getStatus(): Promise<AgentStatus>;
     getBalance(): Promise<Balance>;
     scanPayments(): Promise<Payment[]>;
     exportKey(signature: string, message: string): Promise<{ secret: string }>;
@@ -35,6 +35,10 @@ declare module '@wraith-protocol/sdk-agent' {
     markNotificationsRead(): Promise<void>;
     clearNotifications(): Promise<void>;
   }
+
+  export function validateAgentStatus(payload: unknown, url: string): AgentStatus;
+  export function validatePayment(payload: unknown, url: string, field?: string): Payment;
+  export function parseToolCallPayments(detail: unknown, url: string, field?: string): Payment[];
 
   export enum Chain {
     Horizen = 'horizen',
@@ -85,6 +89,11 @@ declare module '@wraith-protocol/sdk-agent' {
 
   export interface Balance {
     native: string;
+    tokens: Record<string, string>;
+  }
+
+  export interface AgentStatus {
+    balance: string;
     tokens: Record<string, string>;
   }
 

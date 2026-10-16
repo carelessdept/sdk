@@ -223,6 +223,11 @@ interface Balance {
   tokens: Record<string, string>;
 }
 
+interface AgentStatus {
+  balance: string;
+  tokens: Record<string, string>;
+}
+
 interface Payment {
   stealthAddress: string;
   balance: string;

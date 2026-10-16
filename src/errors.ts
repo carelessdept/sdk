@@ -282,6 +282,30 @@ export class HorizonResponseError extends WraithNetworkError {
   }
 }
 
+/**
+ * Thrown when the Wraith Agent API returns a 2xx response whose JSON payload or tool-call output
+ * is malformed or does not match the expected schema.
+ */
+export class AgentResponseError extends WraithNetworkError {
+  readonly code = 'WRAITH/NETWORK/AGENT_RESPONSE';
+  /** Location of the rejected value in the response, e.g. `balance` or `toolCalls[0].detail[0].stealthAddress`. */
+  readonly field: string;
+
+  constructor(url: string, field: string, reason: string) {
+    super(`Invalid agent response from "${url}" at ${field}: ${reason}`, { url, field, reason });
+    this.field = field;
+  }
+
+  describe(): string {
+    const { url, field } = this.context ?? {};
+    return (
+      `Agent endpoint "${url}" returned a response that failed validation at ${field}. ` +
+      `Try: verify that baseUrl points to a compatible Wraith Agent API server and that the ` +
+      `SDK version matches the server response schema. See ${this.docsLink}.`
+    );
+  }
+}
+
 export class RPCRetryExhaustedError extends WraithNetworkError {
   readonly code = 'WRAITH/NETWORK/RPC_RETRY_EXHAUSTED';
 

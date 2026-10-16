@@ -50,6 +50,11 @@ export interface Balance {
   tokens: Record<string, string>;
 }
 
+export interface AgentStatus {
+  balance: string;
+  tokens: Record<string, string>;
+}
+
 export interface Payment {
   stealthAddress: string;
   balance: string;

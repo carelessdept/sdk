@@ -47,6 +47,8 @@ All notable changes to the Wraith Protocol SDK will be documented in this file.
 - **Stellar `findStrictReceivePath` reads and validates real Horizon responses** (issue #236): the function now reads paths from Horizon's `_embedded.records` envelope instead of expecting a bare array, and sends the query parameters Horizon accepts (`source_assets` with `destination_asset_type` / `_code` / `_issuer`; the old `destination_asset` and dummy `source_account` made every live request fail with HTTP 400).
   - Every record is validated before use: amounts, asset type / code / issuer, that the source and destination assets and `destination_amount` match the request, and a path of at most 5 hops. The body is read as a stream and abandoned past 256 KiB; responses over 100 records are rejected. The cheapest valid record is returned. An invalid `destAmount` now throws before the request, and the request uses the Horizon client's default timeouts (`RPCTimeoutError`).
   - New `HorizonResponseError` (`WRAITH/NETWORK/HORIZON_RESPONSE`), exported from the package root, carries the URL and the rejected field. A non-2xx status now throws `RPCRequestError` instead of a plain `Error`.
+- **Typed `sdk-agent` status and payment tool-call validation** (issue #238): `WraithAgent.getStatus()` now returns a typed `Promise<AgentStatus>` instead of `Promise<any>`, and both `/status` payloads and `scan_payments` tool-call JSON payloads are validated at runtime before use.
+  - New `AgentResponseError` (`WRAITH/NETWORK/AGENT_RESPONSE`), exported from both `@wraith-protocol/sdk` and `@wraith-protocol/sdk-agent`, is thrown when an agent endpoint returns invalid JSON, a malformed status object, or invalid payment records in `scanPayments()`.
 
 ### Changed
 

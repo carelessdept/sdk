@@ -64,6 +64,7 @@ export {
   ECDHFailedError,
   RPCRequestError,
   HorizonResponseError,
+  AgentResponseError,
   RPCRetryExhaustedError,
   RPCTimeoutError,
   RetentionExceededError,

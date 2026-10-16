@@ -5,6 +5,11 @@
     "declaration": false,
     "rootDir": "."
   },
-  "include": ["src/**/*.ts", "test/scanner/unified.test-d.ts"],
+  "include": [
+    "src/**/*.ts",
+    "test/scanner/unified.test-d.ts",
+    "packages/sdk-agent/src/**/*.ts",
+    "packages/sdk-agent/test/client.test.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

@@ -15,6 +15,7 @@ import {
   ECDHFailedError,
   RPCRequestError,
   HorizonResponseError,
+  AgentResponseError,
   RPCRetryExhaustedError,
   RPCTimeoutError,
   RetentionExceededError,
@@ -124,6 +125,26 @@ describe('Wraith Custom Errors Taxonomy', () => {
       url: 'https://horizon.stellar.org/paths/strict-receive',
       field: '_embedded.records',
       reason: 'missing or not an array',
+    });
+  });
+
+  test('AgentResponseError instanceof checks', () => {
+    const error = new AgentResponseError(
+      'https://api.wraith.dev/agent/agent-001/status',
+      'balance',
+      'must be a non-empty string',
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toBeInstanceOf(WraithError);
+    expect(error).toBeInstanceOf(WraithNetworkError);
+    expect(error).toBeInstanceOf(AgentResponseError);
+    expect(error.code).toBe('WRAITH/NETWORK/AGENT_RESPONSE');
+    expect(error.name).toBe('AgentResponseError');
+    expect(error.field).toBe('balance');
+    expect(error.context).toEqual({
+      url: 'https://api.wraith.dev/agent/agent-001/status',
+      field: 'balance',
+      reason: 'must be a non-empty string',
     });
   });
 
@@ -314,6 +335,14 @@ describe('Wraith Custom Errors Taxonomy', () => {
       [
         'HorizonResponseError',
         new HorizonResponseError('https://horizon.stellar.org', 'body', 'not valid JSON'),
+      ],
+      [
+        'AgentResponseError',
+        new AgentResponseError(
+          'https://api.wraith.dev/agent/agent-001/status',
+          'balance',
+          'invalid',
+        ),
       ],
       [
         'RPCRetryExhaustedError',
