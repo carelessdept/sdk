@@ -62,10 +62,13 @@ describe('Stellar Wraith Names Resolver', () => {
   });
 
   describe('normalizeStellarName', () => {
-    it('normalizes root names and single-level subdomains', () => {
+    it('normalizes root names and single-level subdomains including short subdomain labels', () => {
       expect(normalizeStellarName('alice')).toBe('alice');
       expect(normalizeStellarName('alice.wraith')).toBe('alice');
       expect(normalizeStellarName('pay.alice.wraith')).toBe('pay.alice');
+      expect(normalizeStellarName('a.alice')).toBe('a.alice');
+      expect(normalizeStellarName('a.alice.wraith')).toBe('a.alice');
+      expect(normalizeStellarName('ab.alice.wraith')).toBe('ab.alice');
       expect(normalizeStellarName('bob123.wraith')).toBe('bob123');
     });
 
@@ -77,7 +80,8 @@ describe('Stellar Wraith Names Resolver', () => {
       expect(() => normalizeStellarName('Alice.wraith')).toThrow(InvalidNameError);
       expect(() => normalizeStellarName('alice_bob.wraith')).toThrow(InvalidNameError);
       expect(() => normalizeStellarName('a.b.alice.wraith')).toThrow(InvalidNameError);
-      expect(() => normalizeStellarName('ab.alice.wraith')).toThrow(InvalidNameError);
+      expect(() => normalizeStellarName('.alice.wraith')).toThrow(InvalidNameError);
+      expect(() => normalizeStellarName('alice..wraith')).toThrow(InvalidNameError);
     });
   });
 
@@ -92,6 +96,19 @@ describe('Stellar Wraith Names Resolver', () => {
 
       expect(first).toBe(validMetaAddress);
       expect(second).toBe(validMetaAddress);
+      expect(mockSimulateTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('resolves a short single-level subdomain such as a.alice', async () => {
+      mockSimulateTransaction.mockResolvedValueOnce(
+        simulated(xdr.ScVal.scvBytes(Buffer.from(validMetaBytes))),
+      );
+
+      const resolved = await resolveStellarName('a.alice.wraith', 'testnet');
+      const cached = await resolveStellarName('a.alice', 'testnet');
+
+      expect(resolved).toBe(validMetaAddress);
+      expect(cached).toBe(validMetaAddress);
       expect(mockSimulateTransaction).toHaveBeenCalledTimes(1);
     });
 

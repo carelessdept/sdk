@@ -16,7 +16,7 @@ import { decodeStealthMetaAddress, encodeStealthMetaAddress } from './meta-addre
 /** Default in-memory TTL for resolved Stellar `.wraith` names (5 minutes). */
 export const DEFAULT_STELLAR_NAME_TTL_MS = 5 * 60 * 1000;
 
-const MIN_LABEL_LEN = 3;
+const MIN_NAME_LEN = 3;
 const MAX_NAME_LEN = 32;
 const LABEL_PATTERN = /^[a-z0-9]+$/;
 const DUMMY_SOURCE = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
@@ -51,10 +51,11 @@ let defaultTtlMs = DEFAULT_STELLAR_NAME_TTL_MS;
 
 /**
  * Normalizes and validates a Stellar `.wraith` name according to the on-chain
- * `wraith-names` contract rules (`3..=32` chars, lowercase ASCII alphanumeric,
- * optional single-level subdomain `sub.parent`, trailing `.wraith` stripped).
+ * `wraith-names` contract rules (`3..=32` chars total, lowercase ASCII alphanumeric
+ * labels, optional single-level subdomain `sub.parent` such as `a.alice`, trailing
+ * `.wraith` stripped).
  *
- * @param name - Raw name string (e.g. `"alice.wraith"`, `"alice"`, `"pay.alice.wraith"`).
+ * @param name - Raw name string (e.g. `"alice.wraith"`, `"alice"`, `"a.alice.wraith"`).
  * @returns Normalized contract lookup key without the `.wraith` suffix.
  * @throws {InvalidNameError} If the name is empty, too short/long, or contains invalid characters/labels.
  */
@@ -64,10 +65,10 @@ export function normalizeStellarName(name: string): string {
   }
 
   const stripped = name.endsWith('.wraith') ? name.slice(0, -7) : name;
-  if (stripped.length < MIN_LABEL_LEN || stripped.length > MAX_NAME_LEN) {
+  if (stripped.length < MIN_NAME_LEN || stripped.length > MAX_NAME_LEN) {
     throw new InvalidNameError(
       name,
-      `Name must be between ${MIN_LABEL_LEN} and ${MAX_NAME_LEN} characters, got ${stripped.length}`,
+      `Name must be between ${MIN_NAME_LEN} and ${MAX_NAME_LEN} characters, got ${stripped.length}`,
     );
   }
 
@@ -77,11 +78,8 @@ export function normalizeStellarName(name: string): string {
   }
 
   for (const label of labels) {
-    if (label.length < MIN_LABEL_LEN) {
-      throw new InvalidNameError(
-        name,
-        `Each name label must be at least ${MIN_LABEL_LEN} characters`,
-      );
+    if (label.length === 0) {
+      throw new InvalidNameError(name, 'Name labels must not be empty');
     }
     if (!LABEL_PATTERN.test(label)) {
       throw new InvalidNameError(
